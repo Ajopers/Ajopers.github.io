@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DuoChat</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div id="app-container">
+        
+        <div id="auth-container">
+            <div class="auth-box">
+                <h1>DuoChat</h1>
+                <p>Ваш личный мессенджер</p>
+                <input type="text" id="username" placeholder="Введите ваше имя">
+                <input type="password" id="secret-key" placeholder="Введите секретный ключ">
+                <button id="enter-chat">Войти в чат</button>
+            </div>
+        </div>
+
+        <div id="chat-container" class="hidden">
+            <div id="chat-header">
+                <h2>DuoChat</h2>
+                <button id="exit-chat">Выйти</button>
+            </div>
+            <div id="messages"></div>
+            <form id="message-form">
+                <input type="text" id="message-input" placeholder="Напишите сообщение или вставьте ссылку..." autocomplete="off">
+                <button type="submit" id="send-button">➤</button>
+            </form>
+        </div>
+
+    </div>
+
+    <!-- Подключение Firebase -->
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
+
+    <!-- Подключение нашего скрипта -->
+    <script src="app.js"></script>
+</body>
+</html>

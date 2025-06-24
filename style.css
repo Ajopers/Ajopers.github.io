@@ -1,0 +1,122 @@
+:root {
+    --bg-color: #121820;
+    --primary-color: #1a2029;
+    --secondary-color: #222b36;
+    --text-color: #e0e7ff;
+    --accent-color: #4f46e5;
+    --my-message-bg: #4f46e5;
+    --friend-message-bg: #374151;
+    --font-family: 'Manrope', sans-serif;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+    font-family: var(--font-family);
+    background-color: var(--bg-color);
+    color: var(--text-color);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100vh;
+    overflow: hidden;
+}
+
+#app-container {
+    width: 100%;
+    height: 100%;
+    max-width: 800px;
+    max-height: 95vh;
+    background-color: var(--primary-color);
+    border-radius: 16px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.hidden { display: none !important; }
+
+#auth-container {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    flex-grow: 1;
+    padding: 20px;
+}
+.auth-box {
+    text-align: center;
+    background: var(--secondary-color);
+    padding: 40px;
+    border-radius: 12px;
+}
+.auth-box h1 { color: var(--accent-color); margin-bottom: 10px; }
+.auth-box p { margin-bottom: 30px; opacity: 0.7; }
+#auth-container input {
+    display: block; width: 100%; padding: 12px; margin-bottom: 15px;
+    border-radius: 8px; border: 1px solid var(--friend-message-bg);
+    background: var(--primary-color); color: var(--text-color); font-size: 16px;
+}
+#auth-container button {
+    width: 100%; padding: 12px; border-radius: 8px; border: none;
+    background: var(--accent-color); color: white; font-size: 16px;
+    font-weight: bold; cursor: pointer; transition: background-color 0.2s;
+}
+#auth-container button:hover { background-color: #4338ca; }
+
+#chat-container { display: flex; flex-direction: column; height: 100%; }
+#chat-header {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 15px 20px; background: var(--secondary-color);
+    border-bottom: 1px solid var(--bg-color);
+}
+#exit-chat {
+    background: none; border: 1px solid var(--friend-message-bg);
+    color: var(--text-color); padding: 5px 10px; border-radius: 6px;
+    cursor: pointer; transition: background-color 0.2s;
+}
+#exit-chat:hover { background-color: var(--friend-message-bg); }
+
+#messages {
+    flex-grow: 1; padding: 20px; overflow-y: auto;
+    display: flex; flex-direction: column;
+}
+#messages::-webkit-scrollbar { width: 6px; }
+#messages::-webkit-scrollbar-track { background: var(--primary-color); }
+#messages::-webkit-scrollbar-thumb { background: var(--friend-message-bg); border-radius: 3px; }
+
+.message {
+    max-width: 70%; padding: 10px 15px; border-radius: 18px;
+    margin-bottom: 15px; line-height: 1.4;
+    animation: fadeIn 0.4s ease-out;
+}
+.message-content { word-wrap: break-word; }
+.message-meta { font-size: 0.75rem; opacity: 0.6; margin-top: 5px; }
+.message.my-message {
+    align-self: flex-end; background-color: var(--my-message-bg); color: white;
+    border-bottom-right-radius: 4px;
+}
+.message.friend-message {
+    align-self: flex-start; background-color: var(--friend-message-bg);
+    border-bottom-left-radius: 4px;
+}
+.message-image { max-width: 100%; border-radius: 10px; margin-top: 5px; }
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+#message-form { display: flex; padding: 15px; background: var(--secondary-color); }
+#message-input {
+    flex-grow: 1; padding: 12px; border: none; border-radius: 20px;
+    background-color: var(--primary-color); color: var(--text-color);
+    font-size: 16px; margin-right: 10px;
+}
+#message-input:focus { outline: none; box-shadow: 0 0 0 2px var(--accent-color); }
+
+#send-button {
+    background: none; border: none; color: var(--text-color); font-size: 24px;
+    cursor: pointer; padding: 0 10px; opacity: 0.7; transition: opacity 0.2s, color 0.2s;
+}
+#send-button:hover { opacity: 1; color: var(--accent-color); }
