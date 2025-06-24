@@ -14,7 +14,7 @@ document.addEventListener('DOMContentLoaded', () => {
     firebase.initializeApp(firebaseConfig);
     const db = firebase.database();
 
-    // --- НОВАЯ ЧАСТЬ ДЛЯ ONESIGNAL ---
+    // --- ЧАСТЬ ДЛЯ ONESIGNAL ---
     window.OneSignal = window.OneSignal || [];
     const OneSignal = window.OneSignal;
 
@@ -27,11 +27,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 appId: ONESIGNAL_APP_ID,
             });
 
-            // Когда пользователь разрешит уведомления, сохраняем его ID
             OneSignal.on('subscriptionChange', function (isSubscribed) {
                 if (isSubscribed) {
                     OneSignal.getUserId(function(userId) {
-                        console.log("OneSignal User ID:", userId);
                         if(currentUser) {
                            db.ref(`users/${currentUser}/oneSignalId`).set(userId);
                         }
@@ -40,8 +38,6 @@ document.addEventListener('DOMContentLoaded', () => {
             });
         });
     }
-    // --- КОНЕЦ НОВОЙ ЧАСТИ ---
-
 
     const authContainer = document.getElementById('auth-container');
     const chatContainer = document.getElementById('chat-container');
@@ -58,10 +54,11 @@ document.addEventListener('DOMContentLoaded', () => {
     let messagesRef = null;
     let friendName = null;
 
-    if (sessionStorage.getItem('duo-user')) {
-        currentUser = sessionStorage.getItem('duo-user');
-        currentSecretKey = sessionStorage.getItem('duo-key');
-        friendName = sessionStorage.getItem('duo-friend');
+    // ИЗМЕНЕНИЕ: Используем localStorage вместо sessionStorage
+    if (localStorage.getItem('duo-user')) {
+        currentUser = localStorage.getItem('duo-user');
+        currentSecretKey = localStorage.getItem('duo-key');
+        friendName = localStorage.getItem('duo-friend');
         showChat();
     }
     
@@ -74,9 +71,10 @@ document.addEventListener('DOMContentLoaded', () => {
             currentUser = username;
             friendName = promptedFriendName.replace(/[.#$\[\]]/g, '_');
             currentSecretKey = btoa(secretKey);
-            sessionStorage.setItem('duo-user', currentUser);
-            sessionStorage.setItem('duo-key', currentSecretKey);
-            sessionStorage.setItem('duo-friend', friendName);
+            // ИЗМЕНЕНИЕ: Используем localStorage вместо sessionStorage
+            localStorage.setItem('duo-user', currentUser);
+            localStorage.setItem('duo-key', currentSecretKey);
+            localStorage.setItem('duo-friend', friendName);
             showChat();
         } else {
             alert('Пожалуйста, введите ваше имя, имя друга и секретный ключ.');
@@ -85,14 +83,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
     exitChatBtn.addEventListener('click', () => {
         if (messagesRef) messagesRef.off();
-        sessionStorage.clear();
+        // ИЗМЕНЕНИЕ: Используем localStorage вместо sessionStorage
+        localStorage.clear();
         window.location.reload();
     });
 
     function showChat() {
         authContainer.classList.add('hidden');
         chatContainer.classList.remove('hidden');
-        initOneSignal(); // << ЗАПУСКАЕМ НАСТРОЙКУ УВЕДОМЛЕНИЙ
+        initOneSignal();
         listenForMessages();
     }
     
@@ -125,7 +124,6 @@ document.addEventListener('DOMContentLoaded', () => {
         e.preventDefault();
         const text = messageInput.value.trim();
         if (text && messagesRef) {
-            // 1. Сохраняем сообщение в базе
             messagesRef.push({
                 author: currentUser,
                 text: text,
@@ -133,7 +131,6 @@ document.addEventListener('DOMContentLoaded', () => {
             });
             messageInput.value = '';
 
-            // 2. Отправляем уведомление другу через OneSignal
             const userTokenRef = db.ref(`users/${friendName}/oneSignalId`);
             const snapshot = await userTokenRef.once('value');
             const friendOneSignalId = snapshot.val();
@@ -145,6 +142,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         include_player_ids: [friendOneSignalId],
                         headings: { "en": `Новое сообщение от ${currentUser}` },
                         contents: { "en": text },
+                        web_push_topic: `chat_${currentSecretKey}` // Добавляем топик, чтобы уведомления не мешали друг другу
                     });
                 });
             } else {
