@@ -38,8 +38,6 @@ document.addEventListener('DOMContentLoaded', () => {
     let presenceRef = null;
     let typingRef = null;
     let typingTimeout = null;
-
-    // --- НОВЫЙ ПОДХОД: ПЕРЕМЕННЫЕ ДЛЯ ХРАНЕНИЯ СОСТОЯНИЯ ---
     let onlineUsersList = [];
     let typingUsersList = [];
 
@@ -50,7 +48,6 @@ document.addEventListener('DOMContentLoaded', () => {
             localStorage.setItem('duo-theme', themeName);
         }
     }
-
     themeButton.addEventListener('click', () => themeModal.classList.remove('hidden'));
     closeThemeModalBtn.addEventListener('click', () => themeModal.classList.add('hidden'));
     themeChoiceBtns.forEach(btn => {
@@ -59,16 +56,13 @@ document.addEventListener('DOMContentLoaded', () => {
             themeModal.classList.add('hidden');
         });
     });
-    
     const savedTheme = localStorage.getItem('duo-theme') || 'dark';
     applyTheme(savedTheme);
-
 
     // --- АВТОРИЗАЦИЯ И ВХОД В ЧАТ ---
     if (localStorage.getItem('duo-user')) {
         currentUser = localStorage.getItem('duo-user');
         currentSecretKey = localStorage.getItem('duo-key');
-        
         if (currentUser === '666') {
             applyTheme('hell');
         } else {
@@ -81,14 +75,11 @@ document.addEventListener('DOMContentLoaded', () => {
     enterChatBtn.addEventListener('click', () => {
         const username = usernameInput.value.trim().replace(/[.#$\[\]]/g, '_');
         const secretKey = secretKeyInput.value.trim();
-
         if (username && secretKey) {
             currentUser = username;
             currentSecretKey = btoa(secretKey);
-            
             localStorage.setItem('duo-user', currentUser);
             localStorage.setItem('duo-key', currentSecretKey);
-
             if (currentUser === '666') {
                 applyTheme('hell');
             } else {
@@ -102,8 +93,11 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     exitChatBtn.addEventListener('click', () => {
-        if (presenceRef) presenceRef.child(currentUser).remove();
-        if (typingRef) typingRef.child(currentUser).remove();
+        const myPresenceRef = db.ref(`presence/${currentSecretKey}/${currentUser}`);
+        const myTypingRef = db.ref(`typing/${currentSecretKey}/${currentUser}`);
+        if(myPresenceRef) myPresenceRef.remove();
+        if(myTypingRef) myTypingRef.remove();
+
         if (messagesRef) messagesRef.off();
         if (presenceRef) presenceRef.off();
         if (typingRef) typingRef.off();
@@ -119,13 +113,11 @@ document.addEventListener('DOMContentLoaded', () => {
         chatTitle.textContent = `Группа: ${atob(currentSecretKey)}`;
         
         listenForMessages();
-        setupPresenceSystem();
-        setupTypingIndicator();
+        setupPresenceAndTyping();
     }
     
     // --- СИСТЕМА СООБЩЕНИЙ ---
     function listenForMessages() {
-        if (messagesRef) messagesRef.off();
         messagesRef = db.ref(`chats/${currentSecretKey}`);
         messagesDiv.innerHTML = ''; 
         messagesRef.orderByChild('timestamp').on('child_added', snapshot => {
@@ -135,23 +127,19 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function displayMessage(data) {
-        // ... (код этой функции не менялся)
         const messageEl = document.createElement('div');
         messageEl.classList.add('message', data.author === currentUser ? 'my-message' : 'friend-message');
         const imgRegex = /\.(jpeg|jpg|gif|png|webp)$/i;
         let content = data.text;
-        
         const tempDiv = document.createElement('div');
         tempDiv.innerText = content;
         content = tempDiv.innerHTML;
-        
         if (imgRegex.test(data.text)) {
             content = `<img src="${data.text}" class="message-image" alt="image">`;
         } else {
             const urlRegex = /((https?:\/\/)[^\s]+)/g;
             content = content.replace(urlRegex, (url) => `<a href="${url}" target="_blank">${url}</a>`);
         }
-        
         messageEl.innerHTML = `<div class="message-content">${content}</div><div class="message-meta"><strong>${data.author}</strong> - ${new Date(data.timestamp).toLocaleTimeString()}</div>`;
         messagesDiv.appendChild(messageEl);
         messagesDiv.scrollTop = messagesDiv.scrollHeight;
@@ -168,65 +156,72 @@ document.addEventListener('DOMContentLoaded', () => {
             });
             messageInput.value = '';
             messageInput.focus();
-            if (typingRef) typingRef.child(currentUser).remove();
+            db.ref(`typing/${currentSecretKey}/${currentUser}`).remove();
         }
     });
 
-    // --- НОВАЯ ЦЕНТРАЛИЗОВАННАЯ ФУНКЦИЯ ОБНОВЛЕНИЯ СТАТУСА ---
+
+    // --- *** ОБЪЕДИНЕННАЯ И ИСПРАВЛЕННАЯ СИСТЕМА СТАТУСОВ *** ---
+    function setupPresenceAndTyping() {
+        presenceRef = db.ref(`presence/${currentSecretKey}`);
+        typingRef = db.ref(`typing/${currentSecretKey}`);
+        const myPresenceRef = presenceRef.child(currentUser);
+        const myTypingRef = typingRef.child(currentUser);
+
+        // Устанавливаем статус "онлайн" и удаляем его при дисконнекте
+        db.ref('.info/connected').on('value', (snapshot) => {
+            if (snapshot.val() === false) {
+                myTypingRef.remove(); // Также удаляем статус "печатает" при дисконнекте
+                return;
+            }
+            myPresenceRef.onDisconnect().remove().then(() => {
+                myPresenceRef.set(true);
+            });
+        });
+
+        // Слушаем, кто онлайн
+        presenceRef.on('value', (snapshot) => {
+            onlineUsersList = snapshot.val() ? Object.keys(snapshot.val()) : [];
+            updateChatStatus();
+        });
+
+        // Слушаем, кто печатает
+        typingRef.on('value', (snapshot) => {
+            typingUsersList = snapshot.val() ? Object.keys(snapshot.val()) : [];
+            updateChatStatus();
+        });
+
+        // Отправляем свой статус "печатает"
+        messageInput.addEventListener('input', () => {
+            if (messageInput.value) {
+                myTypingRef.set(true);
+                clearTimeout(typingTimeout);
+                typingTimeout = setTimeout(() => myTypingRef.remove(), 2500); // 2.5 секунды
+            } else {
+                myTypingRef.remove();
+            }
+        });
+    }
+
     function updateChatStatus() {
+        // Убираем свое имя из списка печатающих, чтобы не видеть "User печатает..." про самого себя
+        const otherTypingUsers = typingUsersList.filter(user => user !== currentUser);
+
         // Приоритет №1: Показать, кто печатает
-        const activeTypingUsers = typingUsersList.filter(user => user !== currentUser);
-        if (activeTypingUsers.length > 0) {
-            chatStatus.textContent = `${activeTypingUsers.join(', ')} печатает...`;
-            return; // Важно: выходим из функции, чтобы не показать статус "в сети"
+        if (otherTypingUsers.length > 0) {
+            const typingText = otherTypingUsers.length > 2 
+                ? `${otherTypingUsers.length} пользователя печатают...`
+                : `${otherTypingUsers.join(', ')} печатает...`;
+            chatStatus.textContent = typingText;
+            return;
         }
 
-        // Приоритет №2: Показать, кто в сети (если никто не печатает)
+        // Приоритет №2: Показать, кто в сети
         const onlineCount = onlineUsersList.length;
         if (onlineCount > 0) {
             chatStatus.textContent = `В сети: ${onlineCount} (${onlineUsersList.join(', ')})`;
         } else {
             chatStatus.textContent = 'В группе никого нет';
         }
-    }
-
-
-    // --- СИСТЕМА ПРИСУТСТВИЯ (ONLINE/OFFLINE) ---
-    function setupPresenceSystem() {
-        presenceRef = db.ref(`presence/${currentSecretKey}`);
-        const myPresenceRef = presenceRef.child(currentUser);
-
-        db.ref('.info/connected').on('value', (snapshot) => {
-            if (snapshot.val() === false) return;
-            myPresenceRef.onDisconnect().remove().then(() => myPresenceRef.set(true));
-        });
-
-        // Слушатель теперь только обновляет список и вызывает общую функцию
-        presenceRef.on('value', (snapshot) => {
-            onlineUsersList = snapshot.val() ? Object.keys(snapshot.val()) : [];
-            updateChatStatus();
-        });
-    }
-
-    // --- ИНДИКАТОР ПЕЧАТИ ---
-    function setupTypingIndicator() {
-        typingRef = db.ref(`typing/${currentSecretKey}`);
-        const myTypingRef = typingRef.child(currentUser);
-
-        messageInput.addEventListener('input', () => {
-            if (messageInput.value) {
-                myTypingRef.set(true);
-                clearTimeout(typingTimeout);
-                typingTimeout = setTimeout(() => myTypingRef.remove(), 3000);
-            } else {
-                myTypingRef.remove();
-            }
-        });
-
-        // Слушатель теперь только обновляет список и вызывает общую функцию
-        typingRef.on('value', (snapshot) => {
-            typingUsersList = snapshot.val() ? Object.keys(snapshot.val()) : [];
-            updateChatStatus();
-        });
     }
 });
