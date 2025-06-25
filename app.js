@@ -14,9 +14,16 @@ document.addEventListener('DOMContentLoaded', () => {
     firebase.initializeApp(firebaseConfig);
     const db = firebase.database();
 
+    // --- ВАЖНО: КОНФИГУРАЦИЯ ONESIGNAL ---
+    window.OneSignal = window.OneSignal || [];
+    const OneSignal = window.OneSignal;
+    // !! ВСТАВЬ СЮДА СВОЙ APP ID ИЗ ПАНЕЛИ ONESIGNAL !!
+    const ONESIGNAL_APP_ID = "cdb703d6-ee0a-4470-8eb8-09fcd2cc654d"; 
+
     // --- ЭЛЕМЕНТЫ DOM ---
     const authContainer = document.getElementById('auth-container');
     const chatContainer = document.getElementById('chat-container');
+    // ... (остальные элементы без изменений)
     const enterChatBtn = document.getElementById('enter-chat');
     const usernameInput = document.getElementById('username');
     const secretKeyInput = document.getElementById('secret-key');
@@ -30,7 +37,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const themeModal = document.getElementById('theme-modal');
     const closeThemeModalBtn = document.getElementById('close-theme-modal');
     const themeChoiceBtns = document.querySelectorAll('.theme-choice');
-    
+
     // --- ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ ---
     let currentUser = null;
     let currentSecretKey = null;
@@ -38,12 +45,36 @@ document.addEventListener('DOMContentLoaded', () => {
     let presenceRef = null;
     let typingRef = null;
     let typingTimeout = null;
-
-    // Переменные для хранения актуального состояния
     let onlineUsers = {};
     let usersTyping = {};
 
-    // --- УПРАВЛЕНИЕ ТЕМАМИ ---
+    // --- ЛОГИКА ONESIGNAL ---
+    function initOneSignal() {
+        OneSignal.push(function() {
+            OneSignal.init({
+                appId: ONESIGNAL_APP_ID,
+            });
+
+            // Когда пользователь подписывается, сохраняем его Player ID в Firebase
+            OneSignal.on('subscriptionChange', function (isSubscribed) {
+                if (isSubscribed) {
+                    OneSignal.getUserId(function(playerId) {
+                        console.log("OneSignal Player ID:", playerId);
+                        if (currentUser && playerId) {
+                           db.ref(`users/${currentUser}/oneSignalPlayerId`).set(playerId);
+                        }
+                    });
+                } else {
+                    // Если пользователь отписался, удаляем его ID
+                     if (currentUser) {
+                        db.ref(`users/${currentUser}/oneSignalPlayerId`).remove();
+                     }
+                }
+            });
+        });
+    }
+
+    // --- УПРАВЛЕНИЕ ТЕМАМИ (без изменений) ---
     function applyTheme(themeName) {
         document.body.className = `theme-${themeName}`;
         if (themeName !== 'hell') localStorage.setItem('duo-theme', themeName);
@@ -59,7 +90,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const savedTheme = localStorage.getItem('duo-theme') || 'dark';
     applyTheme(savedTheme);
 
-    // --- АВТОРИЗАЦИЯ И ВХОД В ЧАТ ---
+
+    // --- АВТОРИЗАЦИЯ И ВХОД ---
     if (localStorage.getItem('duo-user')) {
         currentUser = localStorage.getItem('duo-user');
         currentSecretKey = localStorage.getItem('duo-key');
@@ -85,13 +117,15 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     exitChatBtn.addEventListener('click', () => {
-        const myPresenceRef = db.ref(`presence/${currentSecretKey}/${currentUser}`);
-        const myTypingRef = db.ref(`typing/${currentSecretKey}/${currentUser}`);
-        if(myPresenceRef) myPresenceRef.remove();
-        if(myTypingRef) myTypingRef.remove();
+        // Перед выходом удаляем себя из presence и typing
+        db.ref(`presence/${currentSecretKey}/${currentUser}`).remove();
+        db.ref(`typing/${currentSecretKey}/${currentUser}`).remove();
+
+        // Отписываемся от всех слушателей Firebase
         if (messagesRef) messagesRef.off();
         if (presenceRef) presenceRef.off();
         if (typingRef) typingRef.off();
+        
         localStorage.removeItem('duo-user');
         localStorage.removeItem('duo-key');
         window.location.reload();
@@ -101,11 +135,61 @@ document.addEventListener('DOMContentLoaded', () => {
         authContainer.classList.add('hidden');
         chatContainer.classList.remove('hidden');
         chatTitle.textContent = `Группа: ${atob(currentSecretKey)}`;
+        
+        // ИНИЦИАЛИЗИРУЕМ ONESIGNAL ПРИ ВХОДЕ В ЧАТ
+        initOneSignal();
+
         listenForMessages();
         setupStatusSystem();
     }
     
-    // --- СИСТЕМА СООБЩЕНИЙ ---
+    // --- ОТПРАВКА СООБЩЕНИЙ С УВЕДОМЛЕНИЯМИ ---
+    messageForm.addEventListener('submit', async (e) => { // Добавляем async для ожидания
+        e.preventDefault();
+        const text = messageInput.value.trim();
+        if (!text) return;
+
+        // 1. Отправляем сообщение в чат Firebase
+        messagesRef.push({ author: currentUser, text: text, timestamp: firebase.database.ServerValue.TIMESTAMP });
+        messageInput.value = '';
+        messageInput.focus();
+        db.ref(`typing/${currentSecretKey}/${currentUser}`).remove();
+
+        // 2. Отправляем Push-уведомление через OneSignal
+        try {
+            // Получаем список всех, кто в сети, кроме нас
+            const recipients = Object.keys(onlineUsers).filter(user => user !== currentUser);
+            if (recipients.length === 0) return;
+
+            // Для каждого получаем его Player ID из Firebase
+            const playerIds = [];
+            for (const recipientName of recipients) {
+                const snapshot = await db.ref(`users/${recipientName}/oneSignalPlayerId`).once('value');
+                const playerId = snapshot.val();
+                if (playerId) {
+                    playerIds.push(playerId);
+                }
+            }
+            
+            // Если нашли хотя бы один ID, отправляем уведомление
+            if (playerIds.length > 0) {
+                OneSignal.push(function() {
+                    OneSignal.postNotification({
+                        app_id: ONESIGNAL_APP_ID,
+                        include_player_ids: playerIds,
+                        headings: { "en": `Новое сообщение от ${currentUser}` },
+                        contents: { "en": text },
+                        // Добавляем "значок", чтобы на мобильных устройствах было видно количество
+                        badge_count: 1, 
+                    });
+                });
+            }
+        } catch (error) {
+            console.error("Ошибка при отправке уведомления:", error);
+        }
+    });
+
+    // --- ОСТАЛЬНЫЕ ФУНКЦИИ (без изменений) ---
     function listenForMessages() {
         messagesRef = db.ref(`chats/${currentSecretKey}`);
         messagesDiv.innerHTML = ''; 
@@ -134,68 +218,47 @@ document.addEventListener('DOMContentLoaded', () => {
         messagesDiv.scrollTop = messagesDiv.scrollHeight;
     }
     
-    messageForm.addEventListener('submit', (e) => {
-        e.preventDefault();
-        const text = messageInput.value.trim();
-        if (text && messagesRef) {
-            messagesRef.push({ author: currentUser, text: text, timestamp: firebase.database.ServerValue.TIMESTAMP });
-            messageInput.value = '';
-            messageInput.focus();
-            db.ref(`typing/${currentSecretKey}/${currentUser}`).remove();
-        }
-    });
-
-    // --- НОВАЯ СИСТЕМА СТАТУСОВ ---
     function setupStatusSystem() {
         presenceRef = db.ref(`presence/${currentSecretKey}`);
         typingRef = db.ref(`typing/${currentSecretKey}`);
         const myPresenceRef = presenceRef.child(currentUser);
         const myTypingRef = typingRef.child(currentUser);
 
-        // Устанавливаем свой онлайн-статус
         db.ref('.info/connected').on('value', (snapshot) => {
             if (snapshot.val() === false) {
-                myTypingRef.remove(); // Если соединение потеряно, удаляем свой статус печати
+                myTypingRef.remove();
                 return;
             }
             myPresenceRef.onDisconnect().remove().then(() => myPresenceRef.set(true));
         });
 
-        // Слушаем, кто онлайн
         presenceRef.on('value', (snapshot) => {
             onlineUsers = snapshot.val() || {};
             renderStatus();
         });
 
-        // Слушаем, кто печатает
         typingRef.on('value', (snapshot) => {
             usersTyping = snapshot.val() || {};
             renderStatus();
         });
 
-        // Сообщаем, что мы печатаем
         messageInput.addEventListener('input', () => {
             if (messageInput.value) {
                 myTypingRef.set(true);
                 clearTimeout(typingTimeout);
-                typingTimeout = setTimeout(() => myTypingRef.remove(), 2000); // 2 секунды
+                typingTimeout = setTimeout(() => myTypingRef.remove(), 2000);
             } else {
                 myTypingRef.remove();
             }
         });
     }
 
-    // Единственная функция, которая обновляет текст статуса
     function renderStatus() {
-        // Получаем список печатающих, кроме себя
         const typingNames = Object.keys(usersTyping).filter(name => name !== currentUser);
-        
         if (typingNames.length > 0) {
-            // Приоритет №1: Показать, кто печатает
             const typingText = typingNames.join(', ') + (typingNames.length === 1 ? ' печатает...' : ' печатают...');
             chatStatus.textContent = typingText;
         } else {
-            // Приоритет №2: Показать, кто в сети
             const onlineNames = Object.keys(onlineUsers);
             if (onlineNames.length > 0) {
                 chatStatus.textContent = `В сети: ${onlineNames.length} (${onlineNames.join(', ')})`;
