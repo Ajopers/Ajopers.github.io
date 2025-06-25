@@ -4,7 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>DuoChat</title>
-    <!-- НОВЫЙ СКРИПТ ONESIGNAL -->
     <script src="https://cdn.onesignal.com/sdks/OneSignalSDK.js" async=""></script>
     <link rel="stylesheet" href="style.css">
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -18,28 +17,48 @@
         <div id="auth-container">
             <div class="auth-box">
                 <h1>DuoChat</h1>
-                <p>Ваш личный мессенджер</p>
+                <p>Войди или создай групповой чат</p>
                 <input type="text" id="username" placeholder="Введите ваше имя">
-                <input type="password" id="secret-key" placeholder="Введите секретный ключ">
+                <input type="password" id="secret-key" placeholder="Введите ключ группы">
                 <button id="enter-chat">Войти в чат</button>
             </div>
         </div>
 
         <div id="chat-container" class="hidden">
             <div id="chat-header">
-                <h2>DuoChat</h2>
-                <button id="exit-chat">Выйти</button>
+                <div class="chat-info">
+                    <h2 id="chat-title">DuoChat</h2>
+                    <!-- Элемент для статуса -->
+                    <div id="chat-status"></div>
+                </div>
+                <div class="chat-controls">
+                    <!-- Кнопка смены темы -->
+                    <button id="theme-button">🎨</button>
+                    <button id="exit-chat">Выйти</button>
+                </div>
             </div>
             <div id="messages"></div>
             <form id="message-form">
-                <input type="text" id="message-input" placeholder="Напишите сообщение или вставьте ссылку..." autocomplete="off">
+                <input type="text" id="message-input" placeholder="Напишите сообщение..." autocomplete="off">
                 <button type="submit" id="send-button">➤</button>
             </form>
         </div>
 
     </div>
 
-    <!-- Подключение Firebase (только для базы данных) -->
+    <!-- Модальное окно для смены темы -->
+    <div id="theme-modal" class="hidden">
+        <div class="theme-modal-content">
+            <h3>Выберите тему</h3>
+            <button class="theme-choice" data-theme="dark">Стандартная</button>
+            <button class="theme-choice" data-theme="light">Светлая</button>
+            <button class="theme-choice" data-theme="forest">Лесная</button>
+            <button class="theme-choice" data-theme="ocean">Океан</button>
+            <button id="close-theme-modal">Закрыть</button>
+        </div>
+    </div>
+
+    <!-- Подключение Firebase -->
     <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
     <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
 
