@@ -39,10 +39,13 @@ document.addEventListener('DOMContentLoaded', () => {
     let typingRef = null;
     let typingTimeout = null;
 
+    // --- НОВЫЙ ПОДХОД: ПЕРЕМЕННЫЕ ДЛЯ ХРАНЕНИЯ СОСТОЯНИЯ ---
+    let onlineUsersList = [];
+    let typingUsersList = [];
+
     // --- УПРАВЛЕНИЕ ТЕМАМИ ---
     function applyTheme(themeName) {
         document.body.className = `theme-${themeName}`;
-        // Сохраняем тему, ТОЛЬКО если это не пасхалка. Пасхалка должна быть временной.
         if (themeName !== 'hell') {
             localStorage.setItem('duo-theme', themeName);
         }
@@ -52,13 +55,11 @@ document.addEventListener('DOMContentLoaded', () => {
     closeThemeModalBtn.addEventListener('click', () => themeModal.classList.add('hidden'));
     themeChoiceBtns.forEach(btn => {
         btn.addEventListener('click', () => {
-            const theme = btn.dataset.theme;
-            applyTheme(theme);
+            applyTheme(btn.dataset.theme);
             themeModal.classList.add('hidden');
         });
     });
     
-    // Загружаем тему при старте. Это важно делать до проверки логина.
     const savedTheme = localStorage.getItem('duo-theme') || 'dark';
     applyTheme(savedTheme);
 
@@ -68,16 +69,12 @@ document.addEventListener('DOMContentLoaded', () => {
         currentUser = localStorage.getItem('duo-user');
         currentSecretKey = localStorage.getItem('duo-key');
         
-        // *** ИСПРАВЛЕНИЕ №1 ***
-        // Проверяем на пасхалку даже при восстановлении сессии.
         if (currentUser === '666') {
             applyTheme('hell');
         } else {
-            // Если ник не "666", восстанавливаем сохраненную пользователем тему
             const restoredTheme = localStorage.getItem('duo-theme') || 'dark';
             applyTheme(restoredTheme);
         }
-
         showChat();
     }
     
@@ -92,17 +89,12 @@ document.addEventListener('DOMContentLoaded', () => {
             localStorage.setItem('duo-user', currentUser);
             localStorage.setItem('duo-key', currentSecretKey);
 
-            // *** ИСПРАВЛЕНИЕ №2 ***
-            // Логика пасхалки теперь не конфликтует с сохранением темы
             if (currentUser === '666') {
                 applyTheme('hell');
             } else {
-                // Если пользователь меняет ник, сбрасываем тему на стандартную,
-                // чтобы не осталась "адская" от прошлого логина
                 const currentTheme = localStorage.getItem('duo-theme') || 'dark';
                 applyTheme(currentTheme);
             }
-            
             showChat();
         } else {
             alert('Пожалуйста, введите ваше имя и ключ группы.');
@@ -110,20 +102,14 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     exitChatBtn.addEventListener('click', () => {
-        // Убираем себя из онлайн и печатающих
         if (presenceRef) presenceRef.child(currentUser).remove();
         if (typingRef) typingRef.child(currentUser).remove();
-
-        // Отписываемся от слушателей
         if (messagesRef) messagesRef.off();
         if (presenceRef) presenceRef.off();
         if (typingRef) typingRef.off();
         
-        // *** ИСПРАВЛЕНИЕ №3 ***
-        // Очищаем всё, кроме сохраненной темы, чтобы выбор пользователя не сбрасывался
         localStorage.removeItem('duo-user');
         localStorage.removeItem('duo-key');
-        
         window.location.reload();
     });
 
@@ -141,7 +127,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function listenForMessages() {
         if (messagesRef) messagesRef.off();
         messagesRef = db.ref(`chats/${currentSecretKey}`);
-        messagesDiv.innerHTML = ''; // Очищаем чат перед загрузкой новых сообщений
+        messagesDiv.innerHTML = ''; 
         messagesRef.orderByChild('timestamp').on('child_added', snapshot => {
             const messageData = snapshot.val();
             if (messageData) displayMessage(messageData);
@@ -149,13 +135,12 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function displayMessage(data) {
+        // ... (код этой функции не менялся)
         const messageEl = document.createElement('div');
         messageEl.classList.add('message', data.author === currentUser ? 'my-message' : 'friend-message');
-        
         const imgRegex = /\.(jpeg|jpg|gif|png|webp)$/i;
         let content = data.text;
         
-        // Экранируем HTML, чтобы избежать XSS-атак, кроме наших тегов
         const tempDiv = document.createElement('div');
         tempDiv.innerText = content;
         content = tempDiv.innerHTML;
@@ -187,6 +172,25 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
+    // --- НОВАЯ ЦЕНТРАЛИЗОВАННАЯ ФУНКЦИЯ ОБНОВЛЕНИЯ СТАТУСА ---
+    function updateChatStatus() {
+        // Приоритет №1: Показать, кто печатает
+        const activeTypingUsers = typingUsersList.filter(user => user !== currentUser);
+        if (activeTypingUsers.length > 0) {
+            chatStatus.textContent = `${activeTypingUsers.join(', ')} печатает...`;
+            return; // Важно: выходим из функции, чтобы не показать статус "в сети"
+        }
+
+        // Приоритет №2: Показать, кто в сети (если никто не печатает)
+        const onlineCount = onlineUsersList.length;
+        if (onlineCount > 0) {
+            chatStatus.textContent = `В сети: ${onlineCount} (${onlineUsersList.join(', ')})`;
+        } else {
+            chatStatus.textContent = 'В группе никого нет';
+        }
+    }
+
+
     // --- СИСТЕМА ПРИСУТСТВИЯ (ONLINE/OFFLINE) ---
     function setupPresenceSystem() {
         presenceRef = db.ref(`presence/${currentSecretKey}`);
@@ -194,27 +198,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
         db.ref('.info/connected').on('value', (snapshot) => {
             if (snapshot.val() === false) return;
-            
-            myPresenceRef.onDisconnect().remove()
-                .then(() => myPresenceRef.set(true));
+            myPresenceRef.onDisconnect().remove().then(() => myPresenceRef.set(true));
         });
 
+        // Слушатель теперь только обновляет список и вызывает общую функцию
         presenceRef.on('value', (snapshot) => {
-            const onlineUsers = snapshot.val() ? Object.keys(snapshot.val()) : [];
-            // Обновляем статус, только если никто не печатает
-            if (!chatStatus.dataset.isTyping || chatStatus.dataset.isTyping === 'false') {
-                updateOnlineStatus(onlineUsers);
-            }
+            onlineUsersList = snapshot.val() ? Object.keys(snapshot.val()) : [];
+            updateChatStatus();
         });
-    }
-
-    function updateOnlineStatus(onlineUsers) {
-        const onlineCount = onlineUsers.length;
-        if (onlineCount > 0) {
-            chatStatus.textContent = `В сети: ${onlineCount} (${onlineUsers.join(', ')})`;
-        } else {
-            chatStatus.textContent = 'В группе никого нет';
-        }
     }
 
     // --- ИНДИКАТОР ПЕЧАТИ ---
@@ -232,25 +223,10 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
 
+        // Слушатель теперь только обновляет список и вызывает общую функцию
         typingRef.on('value', (snapshot) => {
-            const typingUsers = [];
-            snapshot.forEach(childSnapshot => {
-                if (childSnapshot.key !== currentUser) {
-                    typingUsers.push(childSnapshot.key);
-                }
-            });
-
-            if (typingUsers.length > 0) {
-                chatStatus.textContent = `${typingUsers.join(', ')} печатает...`;
-                chatStatus.dataset.isTyping = 'true';
-            } else {
-                chatStatus.dataset.isTyping = 'false';
-                // Возвращаем статус "в сети"
-                presenceRef.once('value', (presenceSnapshot) => {
-                    const onlineUsers = presenceSnapshot.val() ? Object.keys(presenceSnapshot.val()) : [];
-                    updateOnlineStatus(onlineUsers);
-                });
-            }
+            typingUsersList = snapshot.val() ? Object.keys(snapshot.val()) : [];
+            updateChatStatus();
         });
     }
 });
