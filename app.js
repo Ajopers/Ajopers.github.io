@@ -1,6 +1,6 @@
+// --- app.js (ВЕРСИЯ С ОТЛАДКОЙ) ---
 document.addEventListener('DOMContentLoaded', () => {
 
-    // --- КОНФИГУРАЦИЯ FIREBASE ---
     const firebaseConfig = {
       apiKey: "AIzaSyAlJPuz42YLW5zKGng0WxtfTZrFn2VR_u8",
       authDomain: "duochatmessenger.firebaseapp.com",
@@ -10,20 +10,16 @@ document.addEventListener('DOMContentLoaded', () => {
       messagingSenderId: "457353996614",
       appId: "1:457353996614:web:1e99ff54ab5e1f4d205d47"
     };
-
     firebase.initializeApp(firebaseConfig);
     const db = firebase.database();
 
-    // --- ВАЖНО: КОНФИГУРАЦИЯ ONESIGNAL ---
     window.OneSignal = window.OneSignal || [];
     const OneSignal = window.OneSignal;
-    // !! ВСТАВЬ СЮДА СВОЙ APP ID ИЗ ПАНЕЛИ ONESIGNAL !!
     const ONESIGNAL_APP_ID = "66444b21-934b-4428-bcc6-8845510894f9"; 
 
-    // --- ЭЛЕМЕНТЫ DOM ---
+    // --- DOM Elements and Global Vars (без изменений) ---
     const authContainer = document.getElementById('auth-container');
     const chatContainer = document.getElementById('chat-container');
-    // ... (остальные элементы без изменений)
     const enterChatBtn = document.getElementById('enter-chat');
     const usernameInput = document.getElementById('username');
     const secretKeyInput = document.getElementById('secret-key');
@@ -37,8 +33,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const themeModal = document.getElementById('theme-modal');
     const closeThemeModalBtn = document.getElementById('close-theme-modal');
     const themeChoiceBtns = document.querySelectorAll('.theme-choice');
-
-    // --- ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ ---
     let currentUser = null;
     let currentSecretKey = null;
     let messagesRef = null;
@@ -48,58 +42,42 @@ document.addEventListener('DOMContentLoaded', () => {
     let onlineUsers = {};
     let usersTyping = {};
 
-    // --- ЛОГИКА ONESIGNAL ---
     function initOneSignal() {
         OneSignal.push(function() {
-            OneSignal.init({
-                appId: ONESIGNAL_APP_ID,
-            });
+            OneSignal.init({ appId: ONESIGNAL_APP_ID });
 
-            // Когда пользователь подписывается, сохраняем его Player ID в Firebase
             OneSignal.on('subscriptionChange', function (isSubscribed) {
                 if (isSubscribed) {
                     OneSignal.getUserId(function(playerId) {
-                        console.log("OneSignal Player ID:", playerId);
+                        // --- ОТЛАДКА ---
+                        console.log("ПОЛУЧЕН ONESIGNAL PLAYER ID:", playerId);
                         if (currentUser && playerId) {
-                           db.ref(`users/${currentUser}/oneSignalPlayerId`).set(playerId);
+                           db.ref(`users/${currentUser}/oneSignalPlayerId`).set(playerId)
+                             .then(() => console.log(`Player ID для ${currentUser} успешно сохранен в Firebase.`))
+                             .catch(err => console.error("ОШИБКА СОХРАНЕНИЯ Player ID:", err));
                         }
                     });
                 } else {
-                    // Если пользователь отписался, удаляем его ID
-                     if (currentUser) {
-                        db.ref(`users/${currentUser}/oneSignalPlayerId`).remove();
-                     }
+                     if (currentUser) db.ref(`users/${currentUser}/oneSignalPlayerId`).remove();
                 }
             });
         });
     }
 
-    // --- УПРАВЛЕНИЕ ТЕМАМИ (без изменений) ---
-    function applyTheme(themeName) {
-        document.body.className = `theme-${themeName}`;
-        if (themeName !== 'hell') localStorage.setItem('duo-theme', themeName);
-    }
+    // --- Theme Management (без изменений) ---
+    function applyTheme(themeName) { document.body.className = `theme-${themeName}`; if (themeName !== 'hell') localStorage.setItem('duo-theme', themeName); }
     themeButton.addEventListener('click', () => themeModal.classList.remove('hidden'));
     closeThemeModalBtn.addEventListener('click', () => themeModal.classList.add('hidden'));
-    themeChoiceBtns.forEach(btn => {
-        btn.addEventListener('click', () => {
-            applyTheme(btn.dataset.theme);
-            themeModal.classList.add('hidden');
-        });
-    });
-    const savedTheme = localStorage.getItem('duo-theme') || 'dark';
-    applyTheme(savedTheme);
+    themeChoiceBtns.forEach(btn => btn.addEventListener('click', () => { applyTheme(btn.dataset.theme); themeModal.classList.add('hidden'); }));
+    applyTheme(localStorage.getItem('duo-theme') || 'dark');
 
-
-    // --- АВТОРИЗАЦИЯ И ВХОД ---
+    // --- Auth and Login Logic (без изменений) ---
     if (localStorage.getItem('duo-user')) {
         currentUser = localStorage.getItem('duo-user');
         currentSecretKey = localStorage.getItem('duo-key');
-        if (currentUser === '666') applyTheme('hell');
-        else applyTheme(localStorage.getItem('duo-theme') || 'dark');
+        if (currentUser === '666') applyTheme('hell'); else applyTheme(localStorage.getItem('duo-theme') || 'dark');
         showChat();
     }
-    
     enterChatBtn.addEventListener('click', () => {
         const username = usernameInput.value.trim().replace(/[.#$\[\]]/g, '_');
         const secretKey = secretKeyInput.value.trim();
@@ -108,70 +86,63 @@ document.addEventListener('DOMContentLoaded', () => {
             currentSecretKey = btoa(secretKey);
             localStorage.setItem('duo-user', currentUser);
             localStorage.setItem('duo-key', currentSecretKey);
-            if (currentUser === '666') applyTheme('hell');
-            else applyTheme(localStorage.getItem('duo-theme') || 'dark');
+            if (currentUser === '666') applyTheme('hell'); else applyTheme(localStorage.getItem('duo-theme') || 'dark');
             showChat();
-        } else {
-            alert('Пожалуйста, введите ваше имя и ключ группы.');
-        }
+        } else alert('Пожалуйста, введите ваше имя и ключ группы.');
     });
-
     exitChatBtn.addEventListener('click', () => {
-        // Перед выходом удаляем себя из presence и typing
         db.ref(`presence/${currentSecretKey}/${currentUser}`).remove();
         db.ref(`typing/${currentSecretKey}/${currentUser}`).remove();
-
-        // Отписываемся от всех слушателей Firebase
-        if (messagesRef) messagesRef.off();
-        if (presenceRef) presenceRef.off();
-        if (typingRef) typingRef.off();
-        
-        localStorage.removeItem('duo-user');
-        localStorage.removeItem('duo-key');
+        if (messagesRef) messagesRef.off(); if (presenceRef) presenceRef.off(); if (typingRef) typingRef.off();
+        localStorage.removeItem('duo-user'); localStorage.removeItem('duo-key');
         window.location.reload();
     });
 
     function showChat() {
-        authContainer.classList.add('hidden');
-        chatContainer.classList.remove('hidden');
+        authContainer.classList.add('hidden'); chatContainer.classList.remove('hidden');
         chatTitle.textContent = `Группа: ${atob(currentSecretKey)}`;
-        
-        // ИНИЦИАЛИЗИРУЕМ ONESIGNAL ПРИ ВХОДЕ В ЧАТ
-        initOneSignal();
-
-        listenForMessages();
-        setupStatusSystem();
+        initOneSignal(); listenForMessages(); setupStatusSystem();
     }
-    
-    // --- ОТПРАВКА СООБЩЕНИЙ С УВЕДОМЛЕНИЯМИ ---
-    messageForm.addEventListener('submit', async (e) => { // Добавляем async для ожидания
+
+    // --- *** ОБНОВЛЕННАЯ ФОРМА ОТПРАВКИ С ДЕТАЛЬНОЙ ОТЛАДКОЙ *** ---
+    messageForm.addEventListener('submit', async (e) => {
         e.preventDefault();
         const text = messageInput.value.trim();
         if (!text) return;
 
-        // 1. Отправляем сообщение в чат Firebase
+        // Шаг 1: Отправка сообщения в чат
         messagesRef.push({ author: currentUser, text: text, timestamp: firebase.database.ServerValue.TIMESTAMP });
-        messageInput.value = '';
-        messageInput.focus();
+        messageInput.value = ''; messageInput.focus();
         db.ref(`typing/${currentSecretKey}/${currentUser}`).remove();
 
-        // 2. Отправляем Push-уведомление через OneSignal
+        // Шаг 2: Отправка Push-уведомления
+        console.log("--- НАЧАЛО ОТПРАВКИ УВЕДОМЛЕНИЯ ---");
         try {
-            // Получаем список всех, кто в сети, кроме нас
             const recipients = Object.keys(onlineUsers).filter(user => user !== currentUser);
-            if (recipients.length === 0) return;
+            console.log("Текущий пользователь:", currentUser);
+            console.log("Всего пользователей в сети:", Object.keys(onlineUsers));
+            console.log("Получатели уведомления (в сети, кроме меня):", recipients);
 
-            // Для каждого получаем его Player ID из Firebase
+            if (recipients.length === 0) {
+                console.log("Нет других пользователей в сети. Уведомление не отправляется.");
+                return;
+            }
+
             const playerIds = [];
             for (const recipientName of recipients) {
+                console.log(`Ищем Player ID для пользователя: ${recipientName}`);
                 const snapshot = await db.ref(`users/${recipientName}/oneSignalPlayerId`).once('value');
                 const playerId = snapshot.val();
+                
                 if (playerId) {
+                    console.log(`%cНАЙДЕН Player ID для ${recipientName}: ${playerId}`, "color: green; font-weight: bold;");
                     playerIds.push(playerId);
+                } else {
+                    console.log(`%cНЕ НАЙДЕН Player ID для ${recipientName} в базе данных.`, "color: red;");
                 }
             }
             
-            // Если нашли хотя бы один ID, отправляем уведомление
+            console.log("Итоговый список Player ID для отправки:", playerIds);
             if (playerIds.length > 0) {
                 OneSignal.push(function() {
                     OneSignal.postNotification({
@@ -179,92 +150,20 @@ document.addEventListener('DOMContentLoaded', () => {
                         include_player_ids: playerIds,
                         headings: { "en": `Новое сообщение от ${currentUser}` },
                         contents: { "en": text },
-                        // Добавляем "значок", чтобы на мобильных устройствах было видно количество
-                        badge_count: 1, 
                     });
                 });
+                console.log("%cУведомление успешно отправлено на сервер OneSignal.", "background: #28a745; color: white;");
+            } else {
+                console.log("Не найдено ни одного Player ID, уведомление не отправлено.");
             }
         } catch (error) {
-            console.error("Ошибка при отправке уведомления:", error);
+            console.error("Критическая ошибка при отправке уведомления:", error);
         }
     });
 
-    // --- ОСТАЛЬНЫЕ ФУНКЦИИ (без изменений) ---
-    function listenForMessages() {
-        messagesRef = db.ref(`chats/${currentSecretKey}`);
-        messagesDiv.innerHTML = ''; 
-        messagesRef.orderByChild('timestamp').on('child_added', snapshot => {
-            const messageData = snapshot.val();
-            if (messageData) displayMessage(messageData);
-        });
-    }
-
-    function displayMessage(data) {
-        const messageEl = document.createElement('div');
-        messageEl.classList.add('message', data.author === currentUser ? 'my-message' : 'friend-message');
-        const imgRegex = /\.(jpeg|jpg|gif|png|webp)$/i;
-        let content = data.text;
-        const tempDiv = document.createElement('div');
-        tempDiv.innerText = content;
-        content = tempDiv.innerHTML;
-        if (imgRegex.test(data.text)) {
-            content = `<img src="${data.text}" class="message-image" alt="image">`;
-        } else {
-            const urlRegex = /((https?:\/\/)[^\s]+)/g;
-            content = content.replace(urlRegex, (url) => `<a href="${url}" target="_blank">${url}</a>`);
-        }
-        messageEl.innerHTML = `<div class="message-content">${content}</div><div class="message-meta"><strong>${data.author}</strong> - ${new Date(data.timestamp).toLocaleTimeString()}</div>`;
-        messagesDiv.appendChild(messageEl);
-        messagesDiv.scrollTop = messagesDiv.scrollHeight;
-    }
-    
-    function setupStatusSystem() {
-        presenceRef = db.ref(`presence/${currentSecretKey}`);
-        typingRef = db.ref(`typing/${currentSecretKey}`);
-        const myPresenceRef = presenceRef.child(currentUser);
-        const myTypingRef = typingRef.child(currentUser);
-
-        db.ref('.info/connected').on('value', (snapshot) => {
-            if (snapshot.val() === false) {
-                myTypingRef.remove();
-                return;
-            }
-            myPresenceRef.onDisconnect().remove().then(() => myPresenceRef.set(true));
-        });
-
-        presenceRef.on('value', (snapshot) => {
-            onlineUsers = snapshot.val() || {};
-            renderStatus();
-        });
-
-        typingRef.on('value', (snapshot) => {
-            usersTyping = snapshot.val() || {};
-            renderStatus();
-        });
-
-        messageInput.addEventListener('input', () => {
-            if (messageInput.value) {
-                myTypingRef.set(true);
-                clearTimeout(typingTimeout);
-                typingTimeout = setTimeout(() => myTypingRef.remove(), 2000);
-            } else {
-                myTypingRef.remove();
-            }
-        });
-    }
-
-    function renderStatus() {
-        const typingNames = Object.keys(usersTyping).filter(name => name !== currentUser);
-        if (typingNames.length > 0) {
-            const typingText = typingNames.join(', ') + (typingNames.length === 1 ? ' печатает...' : ' печатают...');
-            chatStatus.textContent = typingText;
-        } else {
-            const onlineNames = Object.keys(onlineUsers);
-            if (onlineNames.length > 0) {
-                chatStatus.textContent = `В сети: ${onlineNames.length} (${onlineNames.join(', ')})`;
-            } else {
-                chatStatus.textContent = 'В группе никого нет';
-            }
-        }
-    }
+    // --- Остальные функции без изменений ---
+    function listenForMessages(){ messagesRef = db.ref(`chats/${currentSecretKey}`); messagesDiv.innerHTML = ''; messagesRef.orderByChild('timestamp').on('child_added', snapshot => { if(snapshot.val()) displayMessage(snapshot.val()); }); }
+    function displayMessage(data){ const messageEl = document.createElement('div'); messageEl.classList.add('message', data.author === currentUser ? 'my-message' : 'friend-message'); const imgRegex = /\.(jpeg|jpg|gif|png|webp)$/i; let content = data.text; const tempDiv = document.createElement('div'); tempDiv.innerText = content; content = tempDiv.innerHTML; if (imgRegex.test(data.text)) { content = `<img src="${data.text}" class="message-image" alt="image">`; } else { const urlRegex = /((https?:\/\/)[^\s]+)/g; content = content.replace(urlRegex, (url) => `<a href="${url}" target="_blank">${url}</a>`); } messageEl.innerHTML = `<div class="message-content">${content}</div><div class="message-meta"><strong>${data.author}</strong> - ${new Date(data.timestamp).toLocaleTimeString()}</div>`; messagesDiv.appendChild(messageEl); messagesDiv.scrollTop = messagesDiv.scrollHeight; }
+    function setupStatusSystem(){ presenceRef = db.ref(`presence/${currentSecretKey}`); typingRef = db.ref(`typing/${currentSecretKey}`); const myPresenceRef = presenceRef.child(currentUser); const myTypingRef = typingRef.child(currentUser); db.ref('.info/connected').on('value', (snapshot) => { if (snapshot.val() === false) { myTypingRef.remove(); return; } myPresenceRef.onDisconnect().remove().then(() => myPresenceRef.set(true)); }); presenceRef.on('value', (snapshot) => { onlineUsers = snapshot.val() || {}; renderStatus(); }); typingRef.on('value', (snapshot) => { usersTyping = snapshot.val() || {}; renderStatus(); }); messageInput.addEventListener('input', () => { if (messageInput.value) { myTypingRef.set(true); clearTimeout(typingTimeout); typingTimeout = setTimeout(() => myTypingRef.remove(), 2000); } else { myTypingRef.remove(); } }); }
+    function renderStatus(){ const typingNames = Object.keys(usersTyping).filter(name => name !== currentUser); if (typingNames.length > 0) { const typingText = typingNames.join(', ') + (typingNames.length === 1 ? ' печатает...' : ' печатают...'); chatStatus.textContent = typingText; } else { const onlineNames = Object.keys(onlineUsers); if (onlineNames.length > 0) { chatStatus.textContent = `В сети: ${onlineNames.length} (${onlineNames.join(', ')})`; } else { chatStatus.textContent = 'В группе никого нет'; } } }
 });
