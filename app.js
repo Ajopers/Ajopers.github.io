@@ -33,7 +33,7 @@ document.addEventListener('DOMContentLoaded', () => {
     
     // --- ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ ---
     let currentUser = null;
-    let currentSecretKey = null; // Теперь это ключ группы
+    let currentSecretKey = null;
     let messagesRef = null;
     let presenceRef = null;
     let typingRef = null;
@@ -42,26 +42,42 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- УПРАВЛЕНИЕ ТЕМАМИ ---
     function applyTheme(themeName) {
         document.body.className = `theme-${themeName}`;
-        localStorage.setItem('duo-theme', themeName);
+        // Сохраняем тему, ТОЛЬКО если это не пасхалка. Пасхалка должна быть временной.
+        if (themeName !== 'hell') {
+            localStorage.setItem('duo-theme', themeName);
+        }
     }
 
     themeButton.addEventListener('click', () => themeModal.classList.remove('hidden'));
     closeThemeModalBtn.addEventListener('click', () => themeModal.classList.add('hidden'));
     themeChoiceBtns.forEach(btn => {
         btn.addEventListener('click', () => {
-            applyTheme(btn.dataset.theme);
+            const theme = btn.dataset.theme;
+            applyTheme(theme);
             themeModal.classList.add('hidden');
         });
     });
-
-    // Применяем сохраненную тему или тему по умолчанию
+    
+    // Загружаем тему при старте. Это важно делать до проверки логина.
     const savedTheme = localStorage.getItem('duo-theme') || 'dark';
     applyTheme(savedTheme);
+
 
     // --- АВТОРИЗАЦИЯ И ВХОД В ЧАТ ---
     if (localStorage.getItem('duo-user')) {
         currentUser = localStorage.getItem('duo-user');
         currentSecretKey = localStorage.getItem('duo-key');
+        
+        // *** ИСПРАВЛЕНИЕ №1 ***
+        // Проверяем на пасхалку даже при восстановлении сессии.
+        if (currentUser === '666') {
+            applyTheme('hell');
+        } else {
+            // Если ник не "666", восстанавливаем сохраненную пользователем тему
+            const restoredTheme = localStorage.getItem('duo-theme') || 'dark';
+            applyTheme(restoredTheme);
+        }
+
         showChat();
     }
     
@@ -71,14 +87,20 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (username && secretKey) {
             currentUser = username;
-            currentSecretKey = btoa(secretKey); // Простое кодирование, не шифрование
+            currentSecretKey = btoa(secretKey);
             
             localStorage.setItem('duo-user', currentUser);
             localStorage.setItem('duo-key', currentSecretKey);
 
-            // ПАСХАЛКА
-            if (username === '666') {
+            // *** ИСПРАВЛЕНИЕ №2 ***
+            // Логика пасхалки теперь не конфликтует с сохранением темы
+            if (currentUser === '666') {
                 applyTheme('hell');
+            } else {
+                // Если пользователь меняет ник, сбрасываем тему на стандартную,
+                // чтобы не осталась "адская" от прошлого логина
+                const currentTheme = localStorage.getItem('duo-theme') || 'dark';
+                applyTheme(currentTheme);
             }
             
             showChat();
@@ -88,14 +110,20 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     exitChatBtn.addEventListener('click', () => {
-        if (presenceRef) presenceRef.child(currentUser).remove(); // Убираем себя из списка онлайн
-        if (messagesRef) messagesRef.off();
-        if (typingRef) typingRef.off();
-        db.ref(`presence/${currentSecretKey}`).off();
+        // Убираем себя из онлайн и печатающих
+        if (presenceRef) presenceRef.child(currentUser).remove();
+        if (typingRef) typingRef.child(currentUser).remove();
 
-        localStorage.clear();
-        // Сбрасываем тему на стандартную при выходе
-        localStorage.setItem('duo-theme', 'dark');
+        // Отписываемся от слушателей
+        if (messagesRef) messagesRef.off();
+        if (presenceRef) presenceRef.off();
+        if (typingRef) typingRef.off();
+        
+        // *** ИСПРАВЛЕНИЕ №3 ***
+        // Очищаем всё, кроме сохраненной темы, чтобы выбор пользователя не сбрасывался
+        localStorage.removeItem('duo-user');
+        localStorage.removeItem('duo-key');
+        
         window.location.reload();
     });
 
@@ -113,6 +141,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function listenForMessages() {
         if (messagesRef) messagesRef.off();
         messagesRef = db.ref(`chats/${currentSecretKey}`);
+        messagesDiv.innerHTML = ''; // Очищаем чат перед загрузкой новых сообщений
         messagesRef.orderByChild('timestamp').on('child_added', snapshot => {
             const messageData = snapshot.val();
             if (messageData) displayMessage(messageData);
@@ -126,11 +155,16 @@ document.addEventListener('DOMContentLoaded', () => {
         const imgRegex = /\.(jpeg|jpg|gif|png|webp)$/i;
         let content = data.text;
         
+        // Экранируем HTML, чтобы избежать XSS-атак, кроме наших тегов
+        const tempDiv = document.createElement('div');
+        tempDiv.innerText = content;
+        content = tempDiv.innerHTML;
+        
         if (imgRegex.test(data.text)) {
             content = `<img src="${data.text}" class="message-image" alt="image">`;
         } else {
             const urlRegex = /((https?:\/\/)[^\s]+)/g;
-            content = data.text.replace(urlRegex, (url) => `<a href="${url}" target="_blank">${url}</a>`);
+            content = content.replace(urlRegex, (url) => `<a href="${url}" target="_blank">${url}</a>`);
         }
         
         messageEl.innerHTML = `<div class="message-content">${content}</div><div class="message-meta"><strong>${data.author}</strong> - ${new Date(data.timestamp).toLocaleTimeString()}</div>`;
@@ -149,7 +183,6 @@ document.addEventListener('DOMContentLoaded', () => {
             });
             messageInput.value = '';
             messageInput.focus();
-            // Уведомляем, что мы перестали печатать
             if (typingRef) typingRef.child(currentUser).remove();
         }
     });
@@ -163,24 +196,25 @@ document.addEventListener('DOMContentLoaded', () => {
             if (snapshot.val() === false) return;
             
             myPresenceRef.onDisconnect().remove()
-                .then(() => {
-                    myPresenceRef.set(true);
-                });
+                .then(() => myPresenceRef.set(true));
         });
 
         presenceRef.on('value', (snapshot) => {
             const onlineUsers = snapshot.val() ? Object.keys(snapshot.val()) : [];
-            const onlineCount = onlineUsers.length;
-            
-            // Обновляем статус, но не показываем статус печати в этот момент
-            if (!chatStatus.dataset.isTyping) {
-                 if (onlineCount > 0) {
-                    chatStatus.textContent = `В сети: ${onlineCount} (${onlineUsers.join(', ')})`;
-                 } else {
-                    chatStatus.textContent = 'В группе никого нет';
-                 }
+            // Обновляем статус, только если никто не печатает
+            if (!chatStatus.dataset.isTyping || chatStatus.dataset.isTyping === 'false') {
+                updateOnlineStatus(onlineUsers);
             }
         });
+    }
+
+    function updateOnlineStatus(onlineUsers) {
+        const onlineCount = onlineUsers.length;
+        if (onlineCount > 0) {
+            chatStatus.textContent = `В сети: ${onlineCount} (${onlineUsers.join(', ')})`;
+        } else {
+            chatStatus.textContent = 'В группе никого нет';
+        }
     }
 
     // --- ИНДИКАТОР ПЕЧАТИ ---
@@ -189,10 +223,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const myTypingRef = typingRef.child(currentUser);
 
         messageInput.addEventListener('input', () => {
-            // Если пользователь печатает, ставим флаг в БД
             if (messageInput.value) {
                 myTypingRef.set(true);
-                // Убираем флаг через 3 секунды бездействия
                 clearTimeout(typingTimeout);
                 typingTimeout = setTimeout(() => myTypingRef.remove(), 3000);
             } else {
@@ -200,11 +232,9 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
 
-        // Слушаем изменения в "печатающих"
         typingRef.on('value', (snapshot) => {
             const typingUsers = [];
             snapshot.forEach(childSnapshot => {
-                // Добавляем всех, кроме себя
                 if (childSnapshot.key !== currentUser) {
                     typingUsers.push(childSnapshot.key);
                 }
@@ -212,14 +242,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
             if (typingUsers.length > 0) {
                 chatStatus.textContent = `${typingUsers.join(', ')} печатает...`;
-                chatStatus.dataset.isTyping = 'true'; // Флаг, что сейчас показывается статус печати
+                chatStatus.dataset.isTyping = 'true';
             } else {
                 chatStatus.dataset.isTyping = 'false';
-                // Возвращаем статус "в сети", запуская его обновление
-                setupPresenceSystem();
+                // Возвращаем статус "в сети"
                 presenceRef.once('value', (presenceSnapshot) => {
                     const onlineUsers = presenceSnapshot.val() ? Object.keys(presenceSnapshot.val()) : [];
-                    chatStatus.textContent = `В сети: ${onlineUsers.length} (${onlineUsers.join(', ')})`;
+                    updateOnlineStatus(onlineUsers);
                 });
             }
         });
