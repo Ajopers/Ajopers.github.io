@@ -38,15 +38,15 @@ document.addEventListener('DOMContentLoaded', () => {
     let presenceRef = null;
     let typingRef = null;
     let typingTimeout = null;
-    let onlineUsersList = [];
-    let typingUsersList = [];
+
+    // Переменные для хранения актуального состояния
+    let onlineUsers = {};
+    let usersTyping = {};
 
     // --- УПРАВЛЕНИЕ ТЕМАМИ ---
     function applyTheme(themeName) {
         document.body.className = `theme-${themeName}`;
-        if (themeName !== 'hell') {
-            localStorage.setItem('duo-theme', themeName);
-        }
+        if (themeName !== 'hell') localStorage.setItem('duo-theme', themeName);
     }
     themeButton.addEventListener('click', () => themeModal.classList.remove('hidden'));
     closeThemeModalBtn.addEventListener('click', () => themeModal.classList.add('hidden'));
@@ -63,12 +63,8 @@ document.addEventListener('DOMContentLoaded', () => {
     if (localStorage.getItem('duo-user')) {
         currentUser = localStorage.getItem('duo-user');
         currentSecretKey = localStorage.getItem('duo-key');
-        if (currentUser === '666') {
-            applyTheme('hell');
-        } else {
-            const restoredTheme = localStorage.getItem('duo-theme') || 'dark';
-            applyTheme(restoredTheme);
-        }
+        if (currentUser === '666') applyTheme('hell');
+        else applyTheme(localStorage.getItem('duo-theme') || 'dark');
         showChat();
     }
     
@@ -80,12 +76,8 @@ document.addEventListener('DOMContentLoaded', () => {
             currentSecretKey = btoa(secretKey);
             localStorage.setItem('duo-user', currentUser);
             localStorage.setItem('duo-key', currentSecretKey);
-            if (currentUser === '666') {
-                applyTheme('hell');
-            } else {
-                const currentTheme = localStorage.getItem('duo-theme') || 'dark';
-                applyTheme(currentTheme);
-            }
+            if (currentUser === '666') applyTheme('hell');
+            else applyTheme(localStorage.getItem('duo-theme') || 'dark');
             showChat();
         } else {
             alert('Пожалуйста, введите ваше имя и ключ группы.');
@@ -97,11 +89,9 @@ document.addEventListener('DOMContentLoaded', () => {
         const myTypingRef = db.ref(`typing/${currentSecretKey}/${currentUser}`);
         if(myPresenceRef) myPresenceRef.remove();
         if(myTypingRef) myTypingRef.remove();
-
         if (messagesRef) messagesRef.off();
         if (presenceRef) presenceRef.off();
         if (typingRef) typingRef.off();
-        
         localStorage.removeItem('duo-user');
         localStorage.removeItem('duo-key');
         window.location.reload();
@@ -111,9 +101,8 @@ document.addEventListener('DOMContentLoaded', () => {
         authContainer.classList.add('hidden');
         chatContainer.classList.remove('hidden');
         chatTitle.textContent = `Группа: ${atob(currentSecretKey)}`;
-        
         listenForMessages();
-        setupPresenceAndTyping();
+        setupStatusSystem();
     }
     
     // --- СИСТЕМА СООБЩЕНИЙ ---
@@ -149,79 +138,70 @@ document.addEventListener('DOMContentLoaded', () => {
         e.preventDefault();
         const text = messageInput.value.trim();
         if (text && messagesRef) {
-            messagesRef.push({
-                author: currentUser,
-                text: text,
-                timestamp: firebase.database.ServerValue.TIMESTAMP
-            });
+            messagesRef.push({ author: currentUser, text: text, timestamp: firebase.database.ServerValue.TIMESTAMP });
             messageInput.value = '';
             messageInput.focus();
             db.ref(`typing/${currentSecretKey}/${currentUser}`).remove();
         }
     });
 
-
-    // --- *** ОБЪЕДИНЕННАЯ И ИСПРАВЛЕННАЯ СИСТЕМА СТАТУСОВ *** ---
-    function setupPresenceAndTyping() {
+    // --- НОВАЯ СИСТЕМА СТАТУСОВ ---
+    function setupStatusSystem() {
         presenceRef = db.ref(`presence/${currentSecretKey}`);
         typingRef = db.ref(`typing/${currentSecretKey}`);
         const myPresenceRef = presenceRef.child(currentUser);
         const myTypingRef = typingRef.child(currentUser);
 
-        // Устанавливаем статус "онлайн" и удаляем его при дисконнекте
+        // Устанавливаем свой онлайн-статус
         db.ref('.info/connected').on('value', (snapshot) => {
             if (snapshot.val() === false) {
-                myTypingRef.remove(); // Также удаляем статус "печатает" при дисконнекте
+                myTypingRef.remove(); // Если соединение потеряно, удаляем свой статус печати
                 return;
             }
-            myPresenceRef.onDisconnect().remove().then(() => {
-                myPresenceRef.set(true);
-            });
+            myPresenceRef.onDisconnect().remove().then(() => myPresenceRef.set(true));
         });
 
         // Слушаем, кто онлайн
         presenceRef.on('value', (snapshot) => {
-            onlineUsersList = snapshot.val() ? Object.keys(snapshot.val()) : [];
-            updateChatStatus();
+            onlineUsers = snapshot.val() || {};
+            renderStatus();
         });
 
         // Слушаем, кто печатает
         typingRef.on('value', (snapshot) => {
-            typingUsersList = snapshot.val() ? Object.keys(snapshot.val()) : [];
-            updateChatStatus();
+            usersTyping = snapshot.val() || {};
+            renderStatus();
         });
 
-        // Отправляем свой статус "печатает"
+        // Сообщаем, что мы печатаем
         messageInput.addEventListener('input', () => {
             if (messageInput.value) {
                 myTypingRef.set(true);
                 clearTimeout(typingTimeout);
-                typingTimeout = setTimeout(() => myTypingRef.remove(), 2500); // 2.5 секунды
+                typingTimeout = setTimeout(() => myTypingRef.remove(), 2000); // 2 секунды
             } else {
                 myTypingRef.remove();
             }
         });
     }
 
-    function updateChatStatus() {
-        // Убираем свое имя из списка печатающих, чтобы не видеть "User печатает..." про самого себя
-        const otherTypingUsers = typingUsersList.filter(user => user !== currentUser);
-
-        // Приоритет №1: Показать, кто печатает
-        if (otherTypingUsers.length > 0) {
-            const typingText = otherTypingUsers.length > 2 
-                ? `${otherTypingUsers.length} пользователя печатают...`
-                : `${otherTypingUsers.join(', ')} печатает...`;
+    // Единственная функция, которая обновляет текст статуса
+    function renderStatus() {
+        // Получаем список печатающих, кроме себя
+        const typingNames = Object.keys(usersTyping).filter(name => name !== currentUser);
+        
+        if (typingNames.length > 0) {
+            // Приоритет №1: Показать, кто печатает
+            const typingText = typingNames.join(', ') + (typingNames.length === 1 ? ' печатает...' : ' печатают...');
             chatStatus.textContent = typingText;
-            return;
-        }
-
-        // Приоритет №2: Показать, кто в сети
-        const onlineCount = onlineUsersList.length;
-        if (onlineCount > 0) {
-            chatStatus.textContent = `В сети: ${onlineCount} (${onlineUsersList.join(', ')})`;
         } else {
-            chatStatus.textContent = 'В группе никого нет';
+            // Приоритет №2: Показать, кто в сети
+            const onlineNames = Object.keys(onlineUsers);
+            if (onlineNames.length > 0) {
+                chatStatus.textContent = `В сети: ${onlineNames.length} (${onlineNames.join(', ')})`;
+            } else {
+                chatStatus.textContent = 'В группе никого нет';
+            }
         }
     }
 });
