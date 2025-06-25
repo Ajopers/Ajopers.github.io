@@ -18,7 +18,7 @@ document.addEventListener('DOMContentLoaded', () => {
     window.OneSignal = window.OneSignal || [];
     const OneSignal = window.OneSignal;
     // !! ВСТАВЬ СЮДА СВОЙ APP ID ИЗ ПАНЕЛИ ONESIGNAL !!
-    const ONESIGNAL_APP_ID = "cdb703d6-ee0a-4470-8eb8-09fcd2cc654d"; 
+    const ONESIGNAL_APP_ID = "66444b21-934b-4428-bcc6-8845510894f9"; 
 
     // --- ЭЛЕМЕНТЫ DOM ---
     const authContainer = document.getElementById('auth-container');
